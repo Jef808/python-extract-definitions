@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Extract and print definitions within a Python module in JSON format.
 
 The output JSON object contains the following fields:
@@ -123,8 +122,12 @@ def main(files: List[str]) -> None:
         files (List[str]): A list of filepaths to process.
     """
     for f in filter(lambda x: x.endswith('.py'), files):
-        with open(f, 'r', encoding="utf-8") as file:
-            file_content = file.read()
+        try:
+            with open(f, 'r', encoding="utf-8") as file:
+                file_content = file.read()
+        except IOError as e:
+            print(f"Error reading file {f}: {e}", file=sys.stderr)
+            continue
         module_info = get_module_info(file_content)
         print(json.dumps(module_info, indent=2))
 
