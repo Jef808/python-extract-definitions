@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 
-"""A simple script to extract the definitions within a python file.
+"""Extract and print definitions within a Python module in JSON format.
 
-The output is JSON formatted object containing the following fields:
+The output JSON object contains the following fields:
 - docs: The docstring of the file.
 - classes: A list of class definitions.
 - functions: A list of function definitions.
 
-The class and function definitions are themselves objects containing
-the following fields:
-- name: The name of the class or function
-- docstring: The docstring of the class or function
-- content: The content of the class or function
+Each class definition includes:
+- name: The name of the class.
+- docstring: The docstring of the class.
+- bases: A list of base classes.
+- methods: A list of method definitions.
+
+Each function/method definition includes:
+- name: The name of the function/method.
+- docstring: The docstring of the function/method.
+- content: The source code of the function/method.
 """
 
 import ast
@@ -21,14 +26,14 @@ from typing import List, TypedDict
 
 
 class FunctionInfo(TypedDict):
-    """Information of a definition."""
+    """Represents information about a function or method."""
     name: str
     docstring: str
     content: str
 
 
 class ClassInfo(TypedDict):
-    """Information of a class."""
+    """Represents information about a class."""
     name: str
     docstring: str
     bases: List[str]
@@ -36,53 +41,93 @@ class ClassInfo(TypedDict):
 
 
 class ModuleInfo(TypedDict):
-    """Information of a file."""
-    docs: str
+    """Represents information about a module."""
+    docstring: str
     classes: List[ClassInfo]
     functions: List[FunctionInfo]
 
 
-def get_function_info(node: ast.FunctionDef, file_content) -> FunctionInfo:
-    """Get the information of the function."""
-    fname = node.name
-    fdoc = ast.get_docstring(node)
-    fcontent = ast.get_source_segment(file_content, node)
-    return FunctionInfo(name=fname, docstring=fdoc, content=fcontent)
+def extract_function_info(node: ast.FunctionDef,
+                          file_content: str) -> FunctionInfo:
+    """Extract information from a function definition node.
+
+    Args:
+        node (ast.FunctionDef): The AST node representing the function
+                                definition.
+        file_content (str): The full content of the file.
+
+    Returns:
+        FunctionInfo: A dictionary containing the function's name, docstring and
+        content.
+    """
+    return FunctionInfo(
+        name=node.name,
+        docstring=ast.get_docstring(node),
+        content=ast.get_source_segment(file_content, node) or ""
+    )
 
 
-def get_module_info(file_content) -> ModuleInfo:
-    """Get the information of the file."""
+def extract_class_info(node: ast.ClassDef, file_content: str) -> ClassInfo:
+    """Extract information from a class definition node.
 
+    Args:
+        node (ast.ClassDef): The AST node representing the class definition.
+        file_content (str): The full content of the file.
+
+    Returns:
+        ClassInfo: A dictionary containing the class's name, docstring,
+                   base classes, and methods.
+    """
+    methods = [extract_function_info(f, file_content)
+               for f in node.body if isinstance(f, ast.FunctionDef)]
+    return ClassInfo(
+        name=node.name,
+        docstring=ast.get_docstring(node),
+        bases=[base.id for base in node.bases],
+        methods=methods
+    )
+
+
+def get_module_info(file_content: str) -> ModuleInfo:
+    """
+    Extract information from a module's content.
+
+    Args:
+        file_content (str): The full content of the file.
+
+    Returns:
+        ModuleInfo: A dictionary containing the module's docstring,
+                    classes and functions.
+    """
     tree = ast.parse(file_content)
-    stmts = tree.body
+    module_docstring = ast.get_docstring(tree)
 
-    if isinstance(stmts[0], ast.Expr):
-        file_docstring = stmts[0].value.value
-    else:
-        file_docstring = None
+    functions = [extract_function_info(node, file_content)
+                 for node in tree.body if isinstance(node, ast.FunctionDef)]
+    classes = [extract_class_info(node, file_content)
+               for node in tree.body if isinstance(node, ast.ClassDef)]
 
-    result = ModuleInfo(docs=file_docstring, classes=[], functions=[])
+    return ModuleInfo(
+        docstring=module_docstring,
+        classes=classes,
+        functions=functions
+    )
 
-    functions = [node for node in stmts if isinstance(node, ast.FunctionDef)]
-    for f in functions:
-        result['functions'].append(get_function_info(f, file_content))
 
-    classes = [node for node in stmts if isinstance(node, ast.ClassDef)]
-    for c in classes:
-        cname = c.name
-        cdoc = ast.get_docstring(c)
-        cbases = [base.id for base in c.bases]
-        result['classes'].append(ClassInfo(name=cname, docstring=cdoc, bases=cbases, methods=[]))
-        methods = [node for node in c.body if isinstance(node, ast.FunctionDef)]
-        for f in methods:
-            result['classes'][-1]['methods'].append(get_function_info(f, file_content))
+def main(files: List[str]) -> None:
+    """Main function to process the given files and print their data.
 
-    return result
+    The data is a ModuleInfo object and is printed in JSON format.
+
+    Args:
+        files (List[str]): A list of filepaths to process.
+    """
+    for f in filter(lambda x: x.endswith('.py'), files):
+        with open(f, 'r', encoding="utf-8") as file:
+            file_content = file.read()
+        module_info = get_module_info(file_content)
+        print(json.dumps(module_info, indent=2))
 
 
 if __name__ == '__main__':
-    filenames = sys.argv[1:]
-    for f in filter(lambda x: x.endswith('.py'), filenames):
-        with open(f, 'r', encoding="utf-8") as _f:
-            info = get_module_info(_f.read())
-            print(json.dumps(info, indent=2))
+    main(sys.argv[1:])
